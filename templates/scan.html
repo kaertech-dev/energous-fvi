@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% block title %}Packing Scan{% endblock %}
+{% block body %}
+<div class="app-wrap">
+
+  <!-- Header -->
+  <header class="app-header">
+    <div class="header-left">
+      <span class="logo-icon">📦</span>
+      <span class="header-title">Energous FVI Scanning</span>
+    </div>
+    <div class="header-right">
+      <span class="operator-badge">👤 {{ operator_en }}</span>
+      <select id="sel-shift" class="sel-shift">
+        <option value="A">A</option>
+        <option value="B">B</option>
+      </select>
+      <button class="btn-ghost" id="btn-logout">Logout</button>
+    </div>
+  </header>
+
+  <!-- Tray Counter -->
+  <div class="tray-section">
+    <div class="tray-counter-wrap">
+      <div class="tray-counter-label">Units in Tray</div>
+      <div class="tray-counter-display">
+        <span id="count-current">0</span>
+        <span class="tray-sep">/</span>
+        <span class="tray-total">{{ tray_limit }}</span>
+      </div>
+      <div class="tray-bar-wrap">
+        <div id="tray-bar" class="tray-bar" style="width:0%"></div>
+      </div>
+      <div id="tray-status" class="tray-status-label"></div>
+    </div>
+    <button class="btn-reset" id="btn-reset">🔄 New Tray</button>
+  </div>
+
+  <!-- Scan Input -->
+  <div class="scan-section">
+    <div class="scan-row">
+      <input id="scan-input" class="scan-input" type="text"
+             placeholder="Scan or type serial number…" autocomplete="off" autofocus />
+      <button id="btn-scan" class="btn-primary btn-scan">SCAN</button>
+    </div>
+    <div id="scan-msg" class="scan-msg hidden"></div>
+  </div>
+
+  <!-- Log Table -->
+  <div class="log-section">
+    <div class="log-header">
+      <h2>Scan Log</h2>
+      <button class="btn-ghost btn-sm" id="btn-clear-log">Clear Log</button>
+    </div>
+    <div class="table-wrap">
+      <table class="log-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Serial Number</th>
+            <th>PO Number</th>
+            <th>Status</th>
+            <th>Message</th>
+            <th>Time</th>
+          </tr>
+        </thead>
+        <tbody id="log-body">
+          <tr id="empty-row"><td colspan="6" class="empty-log">No scans yet. Start scanning above.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const TRAY_LIMIT = {{ tray_limit }};
+  let count = 0;
+  let logRows = [];
+
+  const countEl   = document.getElementById("count-current");
+  const trayBar   = document.getElementById("tray-bar");
+  const trayLbl   = document.getElementById("tray-status");
+  const scanInput = document.getElementById("scan-input");
+  const scanMsg   = document.getElementById("scan-msg");
+  const logBody   = document.getElementById("log-body");
+  const emptyRow  = document.getElementById("empty-row");
+  const shiftSel  = document.getElementById("sel-shift");
+
+  function updateCounter(n) {
+    count = n;
+    countEl.textContent = n;
+    const pct = Math.min((n / TRAY_LIMIT) * 100, 100);
+    trayBar.style.width = pct + "%";
+    trayBar.className = "tray-bar" + (n >= TRAY_LIMIT ? " full" : n >= TRAY_LIMIT * 0.8 ? " warn" : "");
+    trayLbl.textContent = n >= TRAY_LIMIT ? "✅ Tray Full — Start a New Tray" : "";
+    trayLbl.className = "tray-status-label" + (n >= TRAY_LIMIT ? " full" : "");
+  }
+
+  function showScanMsg(text, type) {
+    scanMsg.textContent = text;
+    scanMsg.className = "scan-msg " + type;
+    clearTimeout(scanMsg._t);
+    scanMsg._t = setTimeout(() => scanMsg.className = "scan-msg hidden", 4000);
+  }
+
+  function addLogRow(serial, po, status, message) {
+    emptyRow.style.display = "none";
+    const idx  = logRows.length + 1;
+    const time = new Date().toLocaleTimeString();
+    const tr   = document.createElement("tr");
+    tr.className = "log-row-" + status;
+    tr.innerHTML = `
+      <td>${idx}</td>
+      <td class="mono">${serial}</td>
+      <td class="mono">${po || "—"}</td>
+      <td><span class="badge badge-${status}">${status.toUpperCase()}</span></td>
+      <td>${message}</td>
+      <td>${time}</td>
+    `;
+    logBody.prepend(tr);
+    logRows.push(tr);
+  }
+
+  async function doScan() {
+    if (count >= TRAY_LIMIT) {
+      showScanMsg("Tray is full (50/50). Click 'New Tray' to reset.", "error");
+      return;
+    }
+    const serial = scanInput.value.trim();
+    if (!serial) { showScanMsg("Please enter a serial number.", "error"); return; }
+
+    const btn = document.getElementById("btn-scan");
+    btn.disabled = true;
+
+    const res  = await fetch("/api/scan", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ serial_num: serial, shift: shiftSel.value })
+    });
+    const data = await res.json();
+
+    btn.disabled = false;
+    scanInput.value = "";
+    scanInput.focus();
+
+    const statusMap = { ok: "ok", already_packed: "warn", fail: "fail", not_found: "fail" };
+    const uiStatus  = statusMap[data.status] || "fail";
+
+    showScanMsg(data.message, data.ok ? "success" : "error");
+    addLogRow(serial, data.unit?.po_num, uiStatus, data.message);
+
+    if (data.ok) updateCounter(count + 1);
+  }
+
+  document.getElementById("btn-scan").addEventListener("click", doScan);
+  scanInput.addEventListener("keydown", e => { if (e.key === "Enter") doScan(); });
+
+  document.getElementById("btn-reset").addEventListener("click", () => {
+    if (!confirm("Start a new tray? The counter will reset to 0.")) return;
+    updateCounter(0);
+    showScanMsg("New tray started.", "success");
+  });
+
+  document.getElementById("btn-clear-log").addEventListener("click", () => {
+    logRows.forEach(r => r.remove());
+    logRows = [];
+    emptyRow.style.display = "";
+  });
+
+  document.getElementById("btn-logout").addEventListener("click", async () => {
+    await fetch("/api/logout", { method: "POST" });
+    window.location.href = "/login";
+  });
+</script>
+{% endblock %}

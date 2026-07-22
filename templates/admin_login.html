@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Admin Login{% endblock %}
+{% block body %}
+<div class="login-wrap">
+  <div class="login-card">
+    <div class="login-logo">
+      <span class="logo-icon">🔐</span>
+      <h1>Admin Dashboard</h1>
+      <p>Enter admin password to continue</p>
+    </div>
+    <div id="msg" class="msg hidden"></div>
+    <div class="field-group">
+      <label for="pw">Password</label>
+      <input id="pw" type="password" placeholder="Admin password" autofocus />
+    </div>
+    <button id="btn-login" class="btn-primary">Enter Dashboard</button>
+  </div>
+</div>
+<script>
+  const pw  = document.getElementById("pw");
+  const btn = document.getElementById("btn-login");
+  const msg = document.getElementById("msg");
+
+  async function doLogin() {
+    btn.disabled = true;
+    const res  = await fetch("/admin/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ password: pw.value })
+    });
+    const data = await res.json();
+    if (data.ok) {
+      window.location.href = "/admin/";
+    } else {
+      msg.textContent = data.message || "Invalid password.";
+      msg.className = "msg error";
+      btn.disabled = false;
+    }
+  }
+
+  btn.addEventListener("click", doLogin);
+  pw.addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
+</script>
+{% endblock %}

@@ -96,6 +96,16 @@
     });
   });
 
+  function escapeHTML(value) {
+    return String(value ?? "").replace(/[&<>"']/g, character => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;"
+    })[character]);
+  }
+
   // ── Load Operator Summary ─────────────────────────────────────────────────
   async function loadOperators() {
     const res  = await fetch("/admin/api/operator-summary");
@@ -108,11 +118,11 @@
       total += r.total_scanned;
       totalPass += r.total_pass;
       return `<tr>
-        <td>${r.operator_en}</td>
-        <td>${r.total_scanned}</td>
-        <td>${r.total_pass}</td>
-        <td>${r.last_scan}</td>
-        <td><button class="btn-ghost btn-sm" onclick="openDetail('${r.operator_en}')">View</button></td>
+        <td>${escapeHTML(r.operator_en)}</td>
+        <td>${escapeHTML(r.total_scanned)}</td>
+        <td>${escapeHTML(r.total_pass)}</td>
+        <td>${escapeHTML(r.last_scan)}</td>
+        <td><button class="btn-ghost btn-sm" data-operator="${escapeHTML(r.operator_en)}">View</button></td>
       </tr>`;
     }).join("");
 
@@ -132,9 +142,9 @@
     tbody.innerHTML = data.data.map(r => {
       if (r.scan_date === today) todayCount = r.total;
       return `<tr>
-        <td>${r.scan_date}</td>
-        <td>${r.total}</td>
-        <td>${r.passed}</td>
+        <td>${escapeHTML(r.scan_date)}</td>
+        <td>${escapeHTML(r.total)}</td>
+        <td>${escapeHTML(r.passed)}</td>
       </tr>`;
     }).join("") || '<tr><td colspan="3" class="empty-log">No data.</td></tr>';
 
@@ -147,13 +157,13 @@
     const data = await res.json();
     const tbody = document.getElementById("log-body");
     tbody.innerHTML = data.data.map(r => `<tr>
-      <td class="mono">${r.serial_num}</td>
-      <td class="mono">${r.po_num}</td>
-      <td>${r.operator_en}</td>
-      <td>${r.shift}</td>
-      <td>${r.date_time}</td>
+      <td class="mono">${escapeHTML(r.serial_num)}</td>
+      <td class="mono">${escapeHTML(r.po_num)}</td>
+      <td>${escapeHTML(r.operator_en)}</td>
+      <td>${escapeHTML(r.shift)}</td>
+      <td>${escapeHTML(r.date_time)}</td>
       <td><span class="badge badge-${r.status == 1 ? 'ok' : 'fail'}">${r.status == 1 ? 'PASS' : 'FAIL'}</span></td>
-      <td>${r.remarks || '—'}</td>
+      <td>${escapeHTML(r.remarks || '—')}</td>
     </tr>`).join("") || '<tr><td colspan="7" class="empty-log">No data.</td></tr>';
   }
 
@@ -163,14 +173,19 @@
     const data = await res.json();
     document.getElementById("modal-title").textContent = "Operator: " + op;
     document.getElementById("modal-body").innerHTML = data.data.map(r => `<tr>
-      <td class="mono">${r.serial_num}</td>
-      <td class="mono">${r.po_num}</td>
-      <td>${r.shift}</td>
-      <td>${r.date_time}</td>
+      <td class="mono">${escapeHTML(r.serial_num)}</td>
+      <td class="mono">${escapeHTML(r.po_num)}</td>
+      <td>${escapeHTML(r.shift)}</td>
+      <td>${escapeHTML(r.date_time)}</td>
       <td><span class="badge badge-${r.status == 1 ? 'ok' : 'fail'}">${r.status == 1 ? 'PASS' : 'FAIL'}</span></td>
     </tr>`).join("") || '<tr><td colspan="5" class="empty-log">No scans.</td></tr>';
     document.getElementById("modal").classList.remove("hidden");
   }
+
+  document.getElementById("op-body").addEventListener("click", event => {
+    const button = event.target.closest("[data-operator]");
+    if (button) openDetail(button.dataset.operator);
+  });
 
   document.getElementById("modal-close").addEventListener("click", () =>
     document.getElementById("modal").classList.add("hidden"));

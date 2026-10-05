@@ -1,8 +1,8 @@
 services:
   traceability:
     build: .
-    image: energous_packaging
-    container_name: energous_packing
+    image: energous_fvi
+    container_name: energous_fvi
     ports:
       - "5050:5050"
     restart: always

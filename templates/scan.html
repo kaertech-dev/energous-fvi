@@ -63,7 +63,7 @@
     <!-- Fail reason input, shown only when FAIL is clicked -->
     <div id="fail-reason-row" class="scan-row hidden">
       <input id="fail-reason" class="scan-input" type="text"
-             placeholder="Enter reason for fail…" autocomplete="off" />
+             placeholder="Enter reason for fail…" autocomplete="off" disabled />
       <button id="btn-submit-fail" class="btn-primary btn-fail">SUBMIT FAIL</button>
       <button id="btn-cancel-fail" class="btn-ghost">Cancel</button>
     </div>
@@ -179,6 +179,7 @@
     scanProgId.disabled = false;
     decisionRow.classList.add("hidden");
     failReasonRow.classList.add("hidden");
+    failReasonInput.disabled = true;
     failReasonInput.value = "";
     scanProgId.focus();
   }
@@ -281,11 +282,13 @@
   btnFail.addEventListener("click", () => {
     decisionRow.classList.add("hidden");
     failReasonRow.classList.remove("hidden");
+    failReasonInput.disabled = false;
     failReasonInput.focus();
   });
 
   btnCancelFail.addEventListener("click", () => {
     failReasonRow.classList.add("hidden");
+    failReasonInput.disabled = true;
     failReasonInput.value = "";
     decisionRow.classList.remove("hidden");
   });

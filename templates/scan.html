@@ -1,3 +1,4 @@
+<!-- scan.html -->
 {% extends "base.html" %}
 {% block title %}Packing Scan{% endblock %}
 {% block body %}
@@ -7,7 +8,7 @@
   <header class="app-header">
     <div class="header-left">
       <span class="logo-icon">📦</span>
-      <span class="header-title">Energous FVI Scanning</span>
+      <span class="header-title">Energous Final Visual Inspection Scanning</span>
     </div>
     <div class="header-right">
       <span class="operator-badge">👤 {{ operator_en }}</span>
@@ -39,11 +40,33 @@
   <!-- Scan Input -->
   <div class="scan-section">
     <div class="scan-row">
-      <input id="scan-input" class="scan-input" type="text"
-             placeholder="Scan or type serial number…" autocomplete="off" autofocus />
-      <button id="btn-scan" class="btn-primary btn-scan">SCAN</button>
+      <input id="scan-prog-id" class="scan-input" type="text"
+             placeholder="Scan or type prog id…" autocomplete="off" autofocus />
+      <button id="btn-scan-prog" class="btn-primary btn-scan">CHECK PROG ID</button>
     </div>
-    <div id="scan-msg" class="scan-msg hidden"></div>
+    <div id="scan-msg-prog" class="scan-msg hidden"></div>
+  </div>
+  <div class="scan-section">
+    <div class="scan-row">
+      <input id="scan-serial" class="scan-input" type="text"
+             placeholder="Scan its serial number to verify…" autocomplete="off" disabled />
+      <button id="btn-scan-serial" class="btn-primary btn-scan" disabled>VERIFY</button>
+    </div>
+    <div id="scan-msg-serial" class="scan-msg hidden"></div>
+
+    <!-- Pass / Fail buttons, shown after serial is verified -->
+    <div id="decision-row" class="scan-row hidden">
+      <button id="btn-pass" class="btn-primary btn-pass">✅ PASS</button>
+      <button id="btn-fail" class="btn-primary btn-fail">❌ FAIL</button>
+    </div>
+
+    <!-- Fail reason input, shown only when FAIL is clicked -->
+    <div id="fail-reason-row" class="scan-row hidden">
+      <input id="fail-reason" class="scan-input" type="text"
+             placeholder="Enter reason for fail…" autocomplete="off" />
+      <button id="btn-submit-fail" class="btn-primary btn-fail">SUBMIT FAIL</button>
+      <button id="btn-cancel-fail" class="btn-ghost">Cancel</button>
+    </div>
   </div>
 
   <!-- Log Table -->
@@ -77,15 +100,30 @@
   const TRAY_LIMIT = {{ tray_limit }};
   let count = 0;
   let logRows = [];
+  let verifiedProgId = null;   // holds the prog_id once step 1 passes
+  let verifiedSerial  = null;  // holds the serial once step 2 passes
 
   const countEl   = document.getElementById("count-current");
   const trayBar   = document.getElementById("tray-bar");
   const trayLbl   = document.getElementById("tray-status");
-  const scanInput = document.getElementById("scan-input");
-  const scanMsg   = document.getElementById("scan-msg");
-  const logBody   = document.getElementById("log-body");
-  const emptyRow  = document.getElementById("empty-row");
-  const shiftSel  = document.getElementById("sel-shift");
+
+  const scanProgId  = document.getElementById("scan-prog-id");
+  const scanSerial  = document.getElementById("scan-serial");
+  const msgProg     = document.getElementById("scan-msg-prog");
+  const msgSerial   = document.getElementById("scan-msg-serial");
+  const logBody     = document.getElementById("log-body");
+  const emptyRow    = document.getElementById("empty-row");
+  const shiftSel    = document.getElementById("sel-shift");
+  const btnProg     = document.getElementById("btn-scan-prog");
+  const btnSerial   = document.getElementById("btn-scan-serial");
+
+  const decisionRow   = document.getElementById("decision-row");
+  const btnPass        = document.getElementById("btn-pass");
+  const btnFail         = document.getElementById("btn-fail");
+  const failReasonRow  = document.getElementById("fail-reason-row");
+  const failReasonInput = document.getElementById("fail-reason");
+  const btnSubmitFail  = document.getElementById("btn-submit-fail");
+  const btnCancelFail  = document.getElementById("btn-cancel-fail");
 
   function updateCounter(n) {
     count = n;
@@ -97,11 +135,11 @@
     trayLbl.className = "tray-status-label" + (n >= TRAY_LIMIT ? " full" : "");
   }
 
-  function showScanMsg(text, type) {
-    scanMsg.textContent = text;
-    scanMsg.className = "scan-msg " + type;
-    clearTimeout(scanMsg._t);
-    scanMsg._t = setTimeout(() => scanMsg.className = "scan-msg hidden", 4000);
+  function showMsg(el, text, type) {
+    el.textContent = text;
+    el.className = "scan-msg " + type;
+    clearTimeout(el._t);
+    el._t = setTimeout(() => el.className = "scan-msg hidden", 4000);
   }
 
   function addLogRow(serial, po, status, message) {
@@ -122,44 +160,139 @@
     logRows.push(tr);
   }
 
-  async function doScan() {
+  function resetProgStep() {
+    verifiedProgId = null;
+    verifiedSerial = null;
+    scanSerial.value = "";
+    scanSerial.disabled = true;
+    btnSerial.disabled = true;
+    scanProgId.value = "";
+    scanProgId.disabled = false;
+    decisionRow.classList.add("hidden");
+    failReasonRow.classList.add("hidden");
+    failReasonInput.value = "";
+    scanProgId.focus();
+  }
+
+  async function doCheckProg() {
+    const progId = scanProgId.value.trim();
+    if (!progId) { showMsg(msgProg, "Please enter a prog id.", "error"); return; }
+
+    btnProg.disabled = true;
+    const res  = await fetch("/api/check-prog", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ prog_id: progId })
+    });
+    const data = await res.json();
+    btnProg.disabled = false;
+
+    showMsg(msgProg, data.message, data.ok ? "success" : "error");
+
+    if (data.ok) {
+      verifiedProgId = progId;
+      scanProgId.disabled = true;
+      scanSerial.disabled = false;
+      scanSerial.focus();
+    }
+  }
+
+  async function doVerifySerial() {
     if (count >= TRAY_LIMIT) {
-      showScanMsg("Tray is full (50/50). Click 'New Tray' to reset.", "error");
+      showMsg(msgSerial, "Tray is full (50/50). Click 'New Tray' to reset.", "error");
       return;
     }
-    const serial = scanInput.value.trim();
-    if (!serial) { showScanMsg("Please enter a serial number.", "error"); return; }
+    if (!verifiedProgId) {
+      showMsg(msgSerial, "Scan and verify a prog id first.", "error");
+      return;
+    }
+    const serial = scanSerial.value.trim();
+    if (!serial) { showMsg(msgSerial, "Please enter a serial number.", "error"); return; }
 
-    const btn = document.getElementById("btn-scan");
-    btn.disabled = true;
+    btnSerial.disabled = true;
 
     const res  = await fetch("/api/scan", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ serial_num: serial, shift: shiftSel.value })
+      body: JSON.stringify({ prog_id: verifiedProgId, serial_num: serial })
     });
     const data = await res.json();
 
-    btn.disabled = false;
-    scanInput.value = "";
-    scanInput.focus();
+    btnSerial.disabled = false;
+    showMsg(msgSerial, data.message, data.ok ? "success" : "error");
 
-    const statusMap = { ok: "ok", already_packed: "warn", fail: "fail", not_found: "fail" };
-    const uiStatus  = statusMap[data.status] || "fail";
-
-    showScanMsg(data.message, data.ok ? "success" : "error");
-    addLogRow(serial, data.unit?.po_num, uiStatus, data.message);
-
-    if (data.ok) updateCounter(count + 1);
+    if (data.ok) {
+      verifiedSerial = serial;
+      scanSerial.disabled = true;
+      decisionRow.classList.remove("hidden");
+    } else {
+      scanSerial.value = "";
+      scanSerial.focus();
+    }
   }
 
-  document.getElementById("btn-scan").addEventListener("click", doScan);
-  scanInput.addEventListener("keydown", e => { if (e.key === "Enter") doScan(); });
+  async function submitDecision(decision, remarks = "") {
+    const res  = await fetch("/api/scan-decision", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prog_id: verifiedProgId,
+        serial_num: verifiedSerial,
+        decision,
+        shift: shiftSel.value,
+        remarks,
+      })
+    });
+    const data = await res.json();
+
+    const statusMap = { ok: "ok", already_packed: "warn", fail: "fail", not_found: "fail", mismatch: "fail" };
+    const uiStatus  = statusMap[data.status] || "fail";
+    const loggedSerial = decision === "fail" ? `${verifiedSerial}_1` : verifiedSerial;
+
+    showMsg(msgSerial, data.message, data.ok ? "success" : "error");
+
+    if (data.ok) {
+      addLogRow(loggedSerial, data.unit?.po_num, uiStatus, data.message);
+      updateCounter(count + 1);
+      resetProgStep();
+    } else {
+      // validation failed on re-check (e.g. stale state) — surface it, keep reason box open on fail
+      addLogRow(verifiedSerial, data.unit?.po_num, uiStatus, data.message);
+    }
+  }
+
+  btnProg.addEventListener("click", doCheckProg);
+  scanProgId.addEventListener("keydown", e => { if (e.key === "Enter") doCheckProg(); });
+
+  btnSerial.addEventListener("click", doVerifySerial);
+  scanSerial.addEventListener("keydown", e => { if (e.key === "Enter") doVerifySerial(); });
+
+  btnPass.addEventListener("click", () => submitDecision("pass"));
+
+  btnFail.addEventListener("click", () => {
+    decisionRow.classList.add("hidden");
+    failReasonRow.classList.remove("hidden");
+    failReasonInput.focus();
+  });
+
+  btnCancelFail.addEventListener("click", () => {
+    failReasonRow.classList.add("hidden");
+    failReasonInput.value = "";
+    decisionRow.classList.remove("hidden");
+  });
+
+  btnSubmitFail.addEventListener("click", () => {
+    const reason = failReasonInput.value.trim();
+    if (!reason) { showMsg(msgSerial, "Please enter a fail reason.", "error"); return; }
+    submitDecision("fail", reason);
+  });
+  failReasonInput.addEventListener("keydown", e => { if (e.key === "Enter") btnSubmitFail.click(); });
 
   document.getElementById("btn-reset").addEventListener("click", () => {
     if (!confirm("Start a new tray? The counter will reset to 0.")) return;
     updateCounter(0);
-    showScanMsg("New tray started.", "success");
+    resetProgStep();
+    showMsg(msgProg, "New tray started.", "success");
   });
 
   document.getElementById("btn-clear-log").addEventListener("click", () => {

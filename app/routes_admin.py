@@ -1,9 +1,7 @@
-from flask import Blueprint, render_template, jsonify, session, redirect, url_for, request
+from flask import Blueprint, render_template, jsonify, session, redirect, url_for, request, current_app
 from app.admin import get_packing_logs, get_operator_summary, get_daily_summary, get_recent_by_operator
 
 admin_bp = Blueprint("admin", __name__, url_prefix="/admin")
-
-ADMIN_PASSWORD = "admin1234"  # Change before production or use env var
 
 # ── Admin Auth ────────────────────────────────────────────────────────────────
 
@@ -14,7 +12,7 @@ def admin_login_page():
 @admin_bp.route("/login", methods=["POST"])
 def admin_login():
     data = request.get_json(force=True)
-    if data.get("password") == ADMIN_PASSWORD:
+    if data.get("password") == current_app.config["ADMIN_PASSWORD"]:
         session["is_admin"] = True
         return jsonify({"ok": True})
     return jsonify({"ok": False, "message": "Invalid password."}), 401

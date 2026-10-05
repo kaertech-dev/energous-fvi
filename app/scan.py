@@ -8,7 +8,7 @@ def lookup_unit(serial_num: str):
     return query_one(
         """
         SELECT serial_num, po_num, progtest, assembly, lasermarking1, vi, ft1, overmold, ft2, lasermarking2, fvi
-        FROM energous.esense_main_copy
+        FROM energous.esense_main
         WHERE serial_num = %s
         LIMIT 1
         """,
@@ -55,7 +55,7 @@ def stations_passed(row: dict) -> bool:
 def record_packing(serial_num: str, po_num: str, operator_en: str, shift: str, remarks: str = ""):
     """
     Atomically:
-      1. Set fvi=1 in esense_main_copy
+      1. Set fvi=1 in esense_main
       2. Insert a row into esense_fvi (status=1, test_rep=1)
     Used for PASS.
     """
@@ -65,7 +65,7 @@ def record_packing(serial_num: str, po_num: str, operator_en: str, shift: str, r
 
         cur.execute(
             """
-            UPDATE energous.esense_main_copy
+            UPDATE energous.esense_main
             SET fvi = 1
             WHERE serial_num = %s
             """,
@@ -94,7 +94,7 @@ def record_fail(serial_num: str, po_num: str, operator_en: str, shift: str, reas
     Record a FAIL:
       - Inserts into esense_fvi with serial_num suffixed "_1"
       - status = 0, remarks = reason
-      - esense_main_copy.vi is NOT touched (unit isn't considered packed,
+      - esense_main.vi is NOT touched (unit isn't considered packed,
         so it can be reworked and re-scanned under its original serial).
     """
     fail_serial = f"{serial_num}_1"
@@ -137,7 +137,7 @@ def validate_scan(prog_id: str, serial_num: str):
     Returns:
       status : "ok" | "already_packed" | "fail" | "not_found" | "mismatch"
       message: human-readable string
-      unit   : the esense_main_copy row (or None)
+      unit   : the esense_main row (or None)
     """
     serial_num = serial_num.strip()
     prog_id = prog_id.strip()

@@ -148,14 +148,23 @@
     const time = new Date().toLocaleTimeString();
     const tr   = document.createElement("tr");
     tr.className = "log-row-" + status;
-    tr.innerHTML = `
-      <td>${idx}</td>
-      <td class="mono">${serial}</td>
-      <td class="mono">${po || "—"}</td>
-      <td><span class="badge badge-${status}">${status.toUpperCase()}</span></td>
-      <td>${message}</td>
-      <td>${time}</td>
-    `;
+    const addCell = (value, className = "") => {
+      const td = document.createElement("td");
+      td.className = className;
+      td.textContent = value;
+      tr.appendChild(td);
+      return td;
+    };
+    addCell(String(idx));
+    addCell(serial, "mono");
+    addCell(po || "—", "mono");
+    const statusCell = addCell("");
+    const badge = document.createElement("span");
+    badge.className = "badge badge-" + status;
+    badge.textContent = status.toUpperCase();
+    statusCell.appendChild(badge);
+    addCell(message);
+    addCell(time);
     logBody.prepend(tr);
     logRows.push(tr);
   }

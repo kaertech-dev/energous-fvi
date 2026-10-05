@@ -1,7 +1,16 @@
 from datetime import datetime
-from app.db import query_one, get_conn
+from app.db import query_one, query_all, get_conn
 
-REQUIRED_STATIONS = ("progtest", "assembly", "lasermarking1")
+REQUIRED_STATIONS = (
+    "progtest",
+    "assembly",
+    "lasermarking1",
+    "vi",
+    "ft1",
+    "ft2",
+    "lasermarking2",
+)
+MAX_FAIL_REPETITIONS = 3
 
 def lookup_unit(serial_num: str):
     """Check b2btag_main for the serial and its station statuses."""
@@ -46,6 +55,38 @@ def already_packed(serial_num: str) -> bool:
         (serial_num,)
     )
     return row is not None
+
+
+def _fail_serials(serial_num: str):
+    return tuple(f"{serial_num}_{attempt}" for attempt in range(1, MAX_FAIL_REPETITIONS + 1))
+
+
+def _failed_attempt_rows(serial_num: str, cursor=None):
+    sql = """
+        SELECT serial_num
+        FROM energous.esense_fvi
+        WHERE serial_num IN (%s, %s, %s) AND status = 0
+    """
+    params = _fail_serials(serial_num)
+    if cursor is None:
+        return query_all(sql, params)
+
+    cursor.execute(sql + " FOR UPDATE", params)
+    return cursor.fetchall()
+
+
+def _fail_repetition(rows) -> int:
+    recorded_repetitions = [
+        int(row["serial_num"].rsplit("_", 1)[1])
+        for row in rows
+    ]
+    return max(len(rows), max(recorded_repetitions, default=0))
+
+
+def fail_repetition(serial_num: str) -> int:
+    """Return the number of failed repetitions already recorded for a serial."""
+    return _fail_repetition(_failed_attempt_rows(serial_num))
+
 
 def stations_passed(row: dict) -> bool:
     """Return True if all required stations are recorded as 1."""
@@ -92,24 +133,39 @@ def record_packing(serial_num: str, po_num: str, operator_en: str, shift: str, r
 def record_fail(serial_num: str, po_num: str, operator_en: str, shift: str, reason: str):
     """
     Record a FAIL:
-      - Inserts into esense_fvi with serial_num suffixed "_1"
+      - Inserts into esense_fvi with serial_num suffixed "_1", "_2", or "_3"
       - status = 0, remarks = reason
-      - esense_main.vi is NOT touched (unit isn't considered packed,
-        so it can be reworked and re-scanned under its original serial).
+      - esense_main.fvi is NOT touched (the unit can be reworked and re-scanned).
     """
-    fail_serial = f"{serial_num}_1"
     conn = get_conn()
     try:
         cur = conn.cursor()
         cur.execute(
             """
+            SELECT serial_num
+            FROM energous.esense_main
+            WHERE serial_num = %s
+            FOR UPDATE
+            """,
+            (serial_num,)
+        )
+        rows = _failed_attempt_rows(serial_num, cur)
+        repetition = _fail_repetition(rows) + 1
+        if repetition > MAX_FAIL_REPETITIONS:
+            conn.rollback()
+            return None
+
+        fail_serial = f"{serial_num}_{repetition}"
+        cur.execute(
+            """
             INSERT INTO energous.esense_fvi
                 (serial_num, po_num, operator_en, shift, date_time, test_rep, remarks, status)
-            VALUES (%s, %s, %s, %s, %s, 1, %s, 0)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, 0)
             """,
-            (fail_serial, po_num, operator_en, shift, datetime.now(), reason)
+            (fail_serial, po_num, operator_en, shift, datetime.now(), repetition, reason)
         )
         conn.commit()
+        return repetition
     except Exception:
         conn.rollback()
         raise
@@ -151,6 +207,13 @@ def validate_scan(prog_id: str, serial_num: str):
 
     if already_packed(serial_num):
         return {"status": "already_packed", "message": f"Serial '{serial_num}' was already packed.", "unit": unit}
+
+    if fail_repetition(serial_num) >= MAX_FAIL_REPETITIONS:
+        return {
+            "status": "max_failures",
+            "message": f"Serial '{serial_num}' has reached the maximum of {MAX_FAIL_REPETITIONS} FAIL attempts.",
+            "unit": unit,
+        }
 
     if not stations_passed(unit):
         failed = [s for s in REQUIRED_STATIONS if unit.get(s) != 1]
@@ -197,10 +260,16 @@ def finalize_scan(prog_id: str, serial_num: str, operator_en: str, shift: str, d
         reason = remarks.strip()
         if not reason:
             return {"status": "fail", "message": "A fail reason is required.", "unit": unit}
-        record_fail(serial_num, unit["po_num"], operator_en, shift, reason)
+        repetition = record_fail(serial_num, unit["po_num"], operator_en, shift, reason)
+        if repetition is None:
+            return {
+                "status": "max_failures",
+                "message": f"Serial '{serial_num}' has reached the maximum of {MAX_FAIL_REPETITIONS} FAIL attempts.",
+                "unit": unit,
+            }
         return {
             "status": "ok",
-            "message": f"Serial '{serial_num}' recorded as FAIL: {reason}",
+            "message": f"Serial '{serial_num}' recorded as FAIL (attempt {repetition} of {MAX_FAIL_REPETITIONS}): {reason}",
             "unit": unit,
             "decision": "fail",
         }

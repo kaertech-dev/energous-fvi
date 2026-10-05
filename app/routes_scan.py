@@ -21,19 +21,11 @@ def login():
     operator = authenticate_operator(employee_num)
     
     if not operator:
-        attempts = session.get("login_attempt", 0) + 1
-        session["login_attempt"] = attempts
-        if attempts >=3:
-            return jsonify({
-                "ok": False, "message": "ang kulit mo, MALI NGANII!"
-            }), 401
-        elif attempts >=6:
-            return jsonify({
-                            "ok": False, "message": "Inulit pa talaga nya!"
-                        }), 401
-        return jsonify({"ok": False, "message": "Employee number not found.!!"}), 401
+        return jsonify({
+            "ok": False,
+            "message": "Unable to sign in. Check your employee number and try again.",
+        }), 401
 
-    session["login_attempt"] = 0
     session["operator_en"] = operator["operator_en"]
     session["employee_num"] = employee_num
     return jsonify({"ok": True, "operator_en": operator["operator_en"]})

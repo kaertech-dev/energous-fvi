@@ -257,12 +257,11 @@
 
     const statusMap = { ok: "ok", already_packed: "warn", fail: "fail", not_found: "fail", mismatch: "fail" };
     const uiStatus  = statusMap[data.status] || "fail";
-    const loggedSerial = decision === "fail" ? `${verifiedSerial}_1` : verifiedSerial;
 
     showMsg(msgSerial, data.message, data.ok ? "success" : "error");
 
     if (data.ok) {
-      addLogRow(loggedSerial, data.unit?.po_num, uiStatus, data.message);
+      addLogRow(data.serial_num, data.unit?.po_num, uiStatus, data.message);
       updateCounter(count + 1);
       resetProgStep();
     } else {

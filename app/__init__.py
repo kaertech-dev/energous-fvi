@@ -14,7 +14,7 @@ def create_app():
 
     @app.errorhandler(pymysql.err.OperationalError)
     def handle_database_unavailable(_error):
-        app.logger.exception("Database operation failed: %s", _error)
+        app.logger.error("Database operation failed", exc_info=_error)
         message = "The database is temporarily unavailable. Please try again shortly."
         if request.path.startswith(("/api/", "/admin/api/")):
             return jsonify({"ok": False, "message": message}), 503

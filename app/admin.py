@@ -1,4 +1,6 @@
-from app.db import query_all, query_one
+from app.db import query_all
+
+ADMIN_READ_TIMEOUT_SECONDS = 20
 
 def get_packing_logs(limit: int = 200):
     return query_all(
@@ -8,7 +10,8 @@ def get_packing_logs(limit: int = 200):
         ORDER BY date_time DESC
         LIMIT %s
         """,
-        (limit,)
+        (limit,),
+        read_timeout=ADMIN_READ_TIMEOUT_SECONDS,
     )
 
 def get_operator_summary():
@@ -22,7 +25,8 @@ def get_operator_summary():
         FROM energous.esense_fvi
         GROUP BY operator_en
         ORDER BY total_scanned DESC
-        """
+        """,
+        read_timeout=ADMIN_READ_TIMEOUT_SECONDS,
     )
 
 def get_daily_summary():
@@ -36,7 +40,8 @@ def get_daily_summary():
         GROUP BY scan_date
         ORDER BY scan_date DESC
         LIMIT 30
-        """
+        """,
+        read_timeout=ADMIN_READ_TIMEOUT_SECONDS,
     )
 
 def get_recent_by_operator(operator_en: str, limit: int = 50):
@@ -48,5 +53,6 @@ def get_recent_by_operator(operator_en: str, limit: int = 50):
         ORDER BY date_time DESC
         LIMIT %s
         """,
-        (operator_en, limit)
+        (operator_en, limit),
+        read_timeout=ADMIN_READ_TIMEOUT_SECONDS,
     )

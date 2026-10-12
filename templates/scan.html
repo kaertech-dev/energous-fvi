@@ -63,7 +63,7 @@
     <!-- Fail reason input, shown only when FAIL is clicked -->
     <div id="fail-reason-row" class="scan-row hidden">
       <input id="fail-reason" class="scan-input" type="text"
-             placeholder="Enter reason for fail…" autocomplete="off" />
+             placeholder="Enter reason for fail…" autocomplete="off" disabled />
       <button id="btn-submit-fail" class="btn-primary btn-fail">SUBMIT FAIL</button>
       <button id="btn-cancel-fail" class="btn-ghost">Cancel</button>
     </div>
@@ -102,6 +102,7 @@
   let logRows = [];
   let verifiedProgId = null;   // holds the prog_id once step 1 passes
   let verifiedSerial  = null;  // holds the serial once step 2 passes
+  let decisionSubmitting = false;
 
   const countEl   = document.getElementById("count-current");
   const trayBar   = document.getElementById("tray-bar");
@@ -179,6 +180,7 @@
     scanProgId.disabled = false;
     decisionRow.classList.add("hidden");
     failReasonRow.classList.add("hidden");
+    failReasonInput.disabled = true;
     failReasonInput.value = "";
     scanProgId.focus();
   }
@@ -241,32 +243,48 @@
   }
 
   async function submitDecision(decision, remarks = "") {
-    const res  = await fetch("/api/scan-decision", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        prog_id: verifiedProgId,
-        serial_num: verifiedSerial,
-        decision,
-        shift: shiftSel.value,
-        remarks,
-      })
-    });
-    const data = await res.json();
+    if (decisionSubmitting) return;
+    decisionSubmitting = true;
+    btnPass.disabled = true;
+    btnFail.disabled = true;
+    btnSubmitFail.disabled = true;
+    btnCancelFail.disabled = true;
+    failReasonInput.disabled = true;
 
-    const statusMap = { ok: "ok", already_packed: "warn", fail: "fail", not_found: "fail", mismatch: "fail" };
-    const uiStatus  = statusMap[data.status] || "fail";
-    const loggedSerial = decision === "fail" ? `${verifiedSerial}_1` : verifiedSerial;
+    try {
+      const res  = await fetch("/api/scan-decision", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prog_id: verifiedProgId,
+          serial_num: verifiedSerial,
+          decision,
+          shift: shiftSel.value,
+          remarks,
+        })
+      });
+      const data = await res.json();
 
-    showMsg(msgSerial, data.message, data.ok ? "success" : "error");
+      const statusMap = { ok: "ok", already_packed: "warn", fail: "fail", not_found: "fail", mismatch: "fail" };
+      const uiStatus  = statusMap[data.status] || "fail";
 
-    if (data.ok) {
-      addLogRow(loggedSerial, data.unit?.po_num, uiStatus, data.message);
-      updateCounter(count + 1);
-      resetProgStep();
-    } else {
-      // validation failed on re-check (e.g. stale state) — surface it, keep reason box open on fail
-      addLogRow(verifiedSerial, data.unit?.po_num, uiStatus, data.message);
+      showMsg(msgSerial, data.message, data.ok ? "success" : "error");
+
+      if (data.ok) {
+        addLogRow(data.serial_num, data.unit?.po_num, uiStatus, data.message);
+        if (data.decision === "pass") updateCounter(count + 1);
+        resetProgStep();
+      } else {
+        // Validation failed on re-check; surface it and keep the decision available.
+        addLogRow(verifiedSerial, data.unit?.po_num, uiStatus, data.message);
+      }
+    } finally {
+      decisionSubmitting = false;
+      btnPass.disabled = false;
+      btnFail.disabled = false;
+      btnSubmitFail.disabled = false;
+      btnCancelFail.disabled = false;
+      failReasonInput.disabled = failReasonRow.classList.contains("hidden");
     }
   }
 
@@ -279,13 +297,17 @@
   btnPass.addEventListener("click", () => submitDecision("pass"));
 
   btnFail.addEventListener("click", () => {
+    if (decisionSubmitting) return;
     decisionRow.classList.add("hidden");
     failReasonRow.classList.remove("hidden");
+    failReasonInput.disabled = false;
     failReasonInput.focus();
   });
 
   btnCancelFail.addEventListener("click", () => {
+    if (decisionSubmitting) return;
     failReasonRow.classList.add("hidden");
+    failReasonInput.disabled = true;
     failReasonInput.value = "";
     decisionRow.classList.remove("hidden");
   });

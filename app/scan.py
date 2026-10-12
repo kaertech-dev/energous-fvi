@@ -272,6 +272,7 @@ def finalize_scan(prog_id: str, serial_num: str, operator_en: str, shift: str, d
             "message": f"Serial '{serial_num}' recorded as FAIL (attempt {repetition} of {MAX_FAIL_REPETITIONS}): {reason}",
             "unit": unit,
             "decision": "fail",
+            "serial_num": f"{serial_num}_{repetition}",
         }
 
     record_packing(serial_num, unit["po_num"], operator_en, shift, remarks)
@@ -280,4 +281,5 @@ def finalize_scan(prog_id: str, serial_num: str, operator_en: str, shift: str, d
         "message": f"Serial '{serial_num}' packed successfully.",
         "unit": unit,
         "decision": "pass",
+        "serial_num": serial_num,
     }

@@ -49,12 +49,16 @@ def verify_prog_matches_serial(prog_id: str, serial_num: str) -> bool:
     )
     return row is not None
 
-def already_packed(serial_num: str) -> bool:
-    row = query_one(
-        "SELECT serial_num FROM energous.esense_fvi WHERE serial_num = %s LIMIT 1",
+def already_packed(serial_num: str) -> dict | None:
+    return query_one(
+        """
+        SELECT serial_num, po_num, operator_en, shift, date_time, test_rep, remarks, status
+        FROM energous.esense_fvi
+        WHERE serial_num = %s AND status = 1
+        LIMIT 1
+        """,
         (serial_num,)
     )
-    return row is not None
 
 
 def _fail_serials(serial_num: str):
@@ -93,16 +97,58 @@ def stations_passed(row: dict) -> bool:
     return all(row.get(s) == 1 for s in REQUIRED_STATIONS)
 
 
-def record_packing(serial_num: str, po_num: str, operator_en: str, shift: str, remarks: str = ""):
+def _already_packed_message(record: dict) -> str:
+    recorded_at = record["date_time"]
+    if isinstance(recorded_at, datetime):
+        recorded_at = recorded_at.strftime("%Y-%m-%d %H:%M:%S")
+    return (
+        f"Serial '{record['serial_num']}' already has a saved PASS row "
+        f"(PO {record['po_num']}, operator {record['operator_en']}, "
+        f"shift {record['shift']}, recorded at {recorded_at}). "
+        "No duplicate was written."
+    )
+
+
+def record_packing(
+    serial_num: str,
+    po_num: str,
+    operator_en: str,
+    shift: str,
+    remarks: str = "",
+) -> dict | None:
     """
     Atomically:
-      1. Set fvi=1 in esense_main
-      2. Insert a row into esense_fvi (status=1, test_rep=1)
-    Used for PASS.
+      1. Lock the unit row and check for an existing PASS record.
+      2. Set fvi=1 and insert a PASS row if none exists.
+    Returns an existing PASS row if this is a repeated request.
     """
-    conn = get_conn()
+    conn = get_conn(read_timeout=15)
     try:
         cur = conn.cursor()
+
+        cur.execute(
+            """
+            SELECT serial_num
+            FROM energous.esense_main
+            WHERE serial_num = %s
+            FOR UPDATE
+            """,
+            (serial_num,)
+        )
+        cur.execute(
+            """
+            SELECT serial_num, po_num, operator_en, shift, date_time, test_rep, remarks, status
+            FROM energous.esense_fvi
+            WHERE serial_num = %s AND status = 1
+            LIMIT 1
+            FOR UPDATE
+            """,
+            (serial_num,)
+        )
+        existing_record = cur.fetchone()
+        if existing_record:
+            conn.commit()
+            return existing_record
 
         cur.execute(
             """
@@ -123,6 +169,7 @@ def record_packing(serial_num: str, po_num: str, operator_en: str, shift: str, r
         )
 
         conn.commit()
+        return None
     except Exception:
         conn.rollback()
         raise
@@ -137,7 +184,7 @@ def record_fail(serial_num: str, po_num: str, operator_en: str, shift: str, reas
       - status = 0, remarks = reason
       - esense_main.fvi is NOT touched (the unit can be reworked and re-scanned).
     """
-    conn = get_conn()
+    conn = get_conn(read_timeout=15)
     try:
         cur = conn.cursor()
         cur.execute(
@@ -205,8 +252,14 @@ def validate_scan(prog_id: str, serial_num: str):
     if not unit:
         return {"status": "not_found", "message": f"Serial '{serial_num}' not found in database.", "unit": None}
 
-    if already_packed(serial_num):
-        return {"status": "already_packed", "message": f"Serial '{serial_num}' was already packed.", "unit": unit}
+    packed_record = already_packed(serial_num)
+    if packed_record:
+        return {
+            "status": "already_packed",
+            "message": _already_packed_message(packed_record),
+            "unit": unit,
+            "saved_record": packed_record,
+        }
 
     if fail_repetition(serial_num) >= MAX_FAIL_REPETITIONS:
         return {
@@ -252,6 +305,15 @@ def finalize_scan(prog_id: str, serial_num: str, operator_en: str, shift: str, d
 
     check = validate_scan(prog_id, serial_num)
     if check["status"] != "ok":
+        if decision == "pass" and check["status"] == "already_packed":
+            return {
+                "status": "ok",
+                "message": check["message"],
+                "unit": check["unit"],
+                "decision": "pass",
+                "serial_num": serial_num,
+                "already_recorded": True,
+            }
         return check
 
     unit = check["unit"]
@@ -275,7 +337,17 @@ def finalize_scan(prog_id: str, serial_num: str, operator_en: str, shift: str, d
             "serial_num": f"{serial_num}_{repetition}",
         }
 
-    record_packing(serial_num, unit["po_num"], operator_en, shift, remarks)
+    existing_record = record_packing(serial_num, unit["po_num"], operator_en, shift, remarks)
+    if existing_record:
+        return {
+            "status": "ok",
+            "message": _already_packed_message(existing_record),
+            "unit": unit,
+            "decision": "pass",
+            "serial_num": serial_num,
+            "already_recorded": True,
+        }
+
     return {
         "status": "ok",
         "message": f"Serial '{serial_num}' packed successfully.",

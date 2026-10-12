@@ -9,6 +9,9 @@ def get_conn():
         password=DBConfig.PASSWORD,
         database=DBConfig.DATABASE,
         port=DBConfig.PORT,
+        connect_timeout=5,
+        read_timeout=5,
+        write_timeout=5,
         cursorclass=pymysql.cursors.DictCursor,
         autocommit=False,
     )

@@ -12,6 +12,9 @@ startup if any required value is missing.
 For local development, install dependencies with `pip install -r requirements.txt`
 and start with `python run.py`. To run in Docker, use `docker compose up --build`.
 The container uses Gunicorn and stores timestamps in the `Asia/Manila` timezone.
+Gunicorn runs two workers, and MySQL connections use five-second connect, read,
+and write timeouts. If a database operation times out, API requests return
+HTTP 503 with a retry message rather than waiting for the Gunicorn worker timeout.
 This app reads and writes the production `energous.esense_main` and
 `energous.esense_fvi` tables.
 

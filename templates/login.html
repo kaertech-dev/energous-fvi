@@ -38,7 +38,7 @@
     btn.disabled = true;
     btn.textContent = "Signing in…";
 
-    const res  = await fetch("/api/login", {
+    const res  = await fetch(APP_ROOT + "/api/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ employee_num })
@@ -47,7 +47,7 @@
 
     if (data.ok) {
       showMsg("Welcome, " + data.operator_en + "! Redirecting…", "success");
-      setTimeout(() => window.location.href = "/", 800);
+      setTimeout(() => window.location.href = APP_ROOT + "/", 800);
     } else {
       showMsg(data.message || "Login failed.", "error");
       btn.disabled = false;

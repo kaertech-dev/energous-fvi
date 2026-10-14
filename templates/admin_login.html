@@ -23,14 +23,14 @@
 
   async function doLogin() {
     btn.disabled = true;
-    const res  = await fetch("/admin/login", {
+    const res  = await fetch(APP_ROOT + "/admin/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ password: pw.value })
     });
     const data = await res.json();
     if (data.ok) {
-      window.location.href = "/admin/";
+      window.location.href = APP_ROOT + "/admin/";
     } else {
       msg.textContent = data.message || "Invalid password.";
       msg.className = "msg error";

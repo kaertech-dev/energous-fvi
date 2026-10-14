@@ -108,7 +108,7 @@
 
   // ── Load Operator Summary ─────────────────────────────────────────────────
   async function loadOperators() {
-    const res  = await fetch("/admin/api/operator-summary");
+    const res  = await fetch(APP_ROOT + "/admin/api/operator-summary");
     const data = await res.json();
     const tbody = document.getElementById("op-body");
     if (!data.data.length) { tbody.innerHTML = '<tr><td colspan="5" class="empty-log">No data.</td></tr>'; return; }
@@ -133,7 +133,7 @@
 
   // ── Load Daily ────────────────────────────────────────────────────────────
   async function loadDaily() {
-    const res  = await fetch("/admin/api/daily-summary");
+    const res  = await fetch(APP_ROOT + "/admin/api/daily-summary");
     const data = await res.json();
     const tbody = document.getElementById("daily-body");
     const today = new Date().toISOString().slice(0, 10);
@@ -153,7 +153,7 @@
 
   // ── Load Logs ─────────────────────────────────────────────────────────────
   async function loadLogs() {
-    const res  = await fetch("/admin/api/logs?limit=200");
+    const res  = await fetch(APP_ROOT + "/admin/api/logs?limit=200");
     const data = await res.json();
     const tbody = document.getElementById("log-body");
     tbody.innerHTML = data.data.map(r => `<tr>
@@ -169,7 +169,7 @@
 
   // ── Operator Detail Modal ─────────────────────────────────────────────────
   async function openDetail(op) {
-    const res  = await fetch("/admin/api/operator/" + encodeURIComponent(op));
+    const res  = await fetch(APP_ROOT + "/admin/api/operator/" + encodeURIComponent(op));
     const data = await res.json();
     document.getElementById("modal-title").textContent = "Operator: " + op;
     document.getElementById("modal-body").innerHTML = data.data.map(r => `<tr>
@@ -196,8 +196,8 @@
 
   document.getElementById("btn-refresh").addEventListener("click", loadAll);
   document.getElementById("btn-logout").addEventListener("click", async () => {
-    await fetch("/admin/logout", { method: "POST" });
-    window.location.href = "/admin/login";
+    await fetch(APP_ROOT + "/admin/logout", { method: "POST" });
+    window.location.href = APP_ROOT + "/admin/login";
   });
 </script>
 {% endblock %}

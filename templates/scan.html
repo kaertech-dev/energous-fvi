@@ -42,16 +42,12 @@
     <div class="scan-row">
       <input id="scan-prog-id" class="scan-input" type="text"
              placeholder="Scan or type prog id…" autocomplete="off" autofocus />
+      <button id="btn-clear-prog" class="btn-ghost" type="button">CLEAR</button>
       <button id="btn-scan-prog" class="btn-primary btn-scan">CHECK PROG ID</button>
     </div>
     <div id="scan-msg-prog" class="scan-msg hidden"></div>
   </div>
   <div class="scan-section">
-    <div class="scan-row">
-      <input id="scan-serial" class="scan-input" type="text"
-             placeholder="Scan its serial number to verify…" autocomplete="off" disabled />
-      <button id="btn-scan-serial" class="btn-primary btn-scan" disabled>VERIFY</button>
-    </div>
     <div id="scan-msg-serial" class="scan-msg hidden"></div>
 
     <!-- Pass / Fail buttons, shown after serial is verified -->
@@ -100,8 +96,8 @@
   const TRAY_LIMIT = {{ tray_limit }};
   let count = 0;
   let logRows = [];
-  let verifiedProgId = null;   // holds the prog_id once step 1 passes
-  let verifiedSerial  = null;  // holds the serial once step 2 passes
+  let verifiedProgId = null;
+  let verifiedSerial  = null;
   let decisionSubmitting = false;
 
   const countEl   = document.getElementById("count-current");
@@ -109,14 +105,13 @@
   const trayLbl   = document.getElementById("tray-status");
 
   const scanProgId  = document.getElementById("scan-prog-id");
-  const scanSerial  = document.getElementById("scan-serial");
   const msgProg     = document.getElementById("scan-msg-prog");
   const msgSerial   = document.getElementById("scan-msg-serial");
   const logBody     = document.getElementById("log-body");
   const emptyRow    = document.getElementById("empty-row");
   const shiftSel    = document.getElementById("sel-shift");
   const btnProg     = document.getElementById("btn-scan-prog");
-  const btnSerial   = document.getElementById("btn-scan-serial");
+  const btnClearProg = document.getElementById("btn-clear-prog");
 
   const decisionRow   = document.getElementById("decision-row");
   const btnPass        = document.getElementById("btn-pass");
@@ -173,9 +168,6 @@
   function resetProgStep() {
     verifiedProgId = null;
     verifiedSerial = null;
-    scanSerial.value = "";
-    scanSerial.disabled = true;
-    btnSerial.disabled = true;
     scanProgId.value = "";
     scanProgId.disabled = false;
     decisionRow.classList.add("hidden");
@@ -186,59 +178,52 @@
   }
 
   async function doCheckProg() {
+    if (count >= TRAY_LIMIT) {
+      showMsg(msgProg, `Tray is full (${TRAY_LIMIT}/${TRAY_LIMIT}). Click 'New Tray' to reset.`, "error");
+      return;
+    }
+
     const progId = scanProgId.value.trim();
     if (!progId) { showMsg(msgProg, "Please enter a prog id.", "error"); return; }
 
     btnProg.disabled = true;
-    const res  = await fetch(APP_ROOT + "/api/check-prog", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prog_id: progId })
-    });
-    const data = await res.json();
-    btnProg.disabled = false;
-
-    showMsg(msgProg, data.message, data.ok ? "success" : "error");
-
-    if (data.ok) {
-      verifiedProgId = progId;
+    btnClearProg.disabled = true;
+    try {
       scanProgId.disabled = true;
-      scanSerial.disabled = false;
-      scanSerial.focus();
-    }
-  }
+      const res  = await fetch(APP_ROOT + "/api/check-prog", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prog_id: progId, shift: shiftSel.value })
+      });
+      const data = await res.json();
 
-  async function doVerifySerial() {
-    if (count >= TRAY_LIMIT) {
-      showMsg(msgSerial, "Tray is full (50/50). Click 'New Tray' to reset.", "error");
-      return;
-    }
-    if (!verifiedProgId) {
-      showMsg(msgSerial, "Scan and verify a prog id first.", "error");
-      return;
-    }
-    const serial = scanSerial.value.trim();
-    if (!serial) { showMsg(msgSerial, "Please enter a serial number.", "error"); return; }
+      if (data.mismatch_recorded) {
+        addLogRow(data.recorded_serial_num, data.unit?.po_num, "fail", data.message);
+        resetProgStep();
+        showMsg(msgSerial, data.message, "warning");
+        return;
+      }
 
-    btnSerial.disabled = true;
+      showMsg(msgProg, data.message, data.ok ? "success" : "error");
 
-    const res  = await fetch(APP_ROOT + "/api/scan", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prog_id: verifiedProgId, serial_num: serial })
-    });
-    const data = await res.json();
-
-    btnSerial.disabled = false;
-    showMsg(msgSerial, data.message, data.ok ? "success" : "error");
-
-    if (data.ok) {
-      verifiedSerial = serial;
-      scanSerial.disabled = true;
-      decisionRow.classList.remove("hidden");
-    } else {
-      scanSerial.value = "";
-      scanSerial.focus();
+      if (data.ok) {
+        verifiedProgId = progId;
+        verifiedSerial = data.serial_num;
+        decisionRow.classList.remove("hidden");
+        showMsg(msgSerial, `Serial '${verifiedSerial}' retrieved from prog ID and verified.`, "success");
+      } else {
+        scanProgId.disabled = false;
+        if (data.status === "already_packed") {
+          addLogRow(data.serial_num, data.unit?.po_num, "warn", data.message);
+        }
+      }
+    } catch (error) {
+      scanProgId.disabled = false;
+      showMsg(msgProg, "Unable to verify prog ID. Please try again.", "error");
+      console.error("Prog ID verification request failed:", error);
+    } finally {
+      btnProg.disabled = false;
+      btnClearProg.disabled = false;
     }
   }
 
@@ -249,6 +234,7 @@
     btnFail.disabled = true;
     btnSubmitFail.disabled = true;
     btnCancelFail.disabled = true;
+    btnClearProg.disabled = true;
     failReasonInput.disabled = true;
 
     try {
@@ -284,15 +270,20 @@
       btnFail.disabled = false;
       btnSubmitFail.disabled = false;
       btnCancelFail.disabled = false;
+      btnClearProg.disabled = false;
       failReasonInput.disabled = failReasonRow.classList.contains("hidden");
     }
   }
 
+  btnClearProg.addEventListener("click", () => {
+    if (decisionSubmitting) return;
+    resetProgStep();
+    msgProg.className = "scan-msg hidden";
+    msgSerial.className = "scan-msg hidden";
+  });
+
   btnProg.addEventListener("click", doCheckProg);
   scanProgId.addEventListener("keydown", e => { if (e.key === "Enter") doCheckProg(); });
-
-  btnSerial.addEventListener("click", doVerifySerial);
-  scanSerial.addEventListener("keydown", e => { if (e.key === "Enter") doVerifySerial(); });
 
   btnPass.addEventListener("click", () => submitDecision("pass"));
 

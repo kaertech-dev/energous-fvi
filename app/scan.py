@@ -60,42 +60,44 @@ def already_packed(serial_num: str) -> dict | None:
         (serial_num,)
     )
 
-
-def _fail_serials(serial_num: str):
-    return tuple(f"{serial_num}_{attempt}" for attempt in range(1, MAX_FAIL_REPETITIONS + 1))
-
-
 def _failed_attempt_rows(serial_num: str, cursor=None):
     sql = """
-        SELECT serial_num
+        SELECT serial_num, remarks
         FROM energous.esense_fvi
-        WHERE serial_num IN (%s, %s, %s) AND status = 0
+        WHERE serial_num LIKE %s ESCAPE '=' AND status = 0
     """
-    params = _fail_serials(serial_num)
+    escaped_serial = (
+        serial_num.replace("=", "==")
+        .replace("%", "=%")
+        .replace("_", "=_")
+    )
+    params = (f"{escaped_serial}=_%",)
     if cursor is None:
         return query_all(sql, params)
 
     cursor.execute(sql + " FOR UPDATE", params)
     return cursor.fetchall()
 
-
 def _fail_repetition(rows) -> int:
     recorded_repetitions = [
         int(row["serial_num"].rsplit("_", 1)[1])
         for row in rows
+        if row["serial_num"].rsplit("_", 1)[1].isdigit()
     ]
-    return max(len(rows), max(recorded_repetitions, default=0))
+    return max(recorded_repetitions, default=0)
 
-
-def fail_repetition(serial_num: str) -> int:
-    """Return the number of failed repetitions already recorded for a serial."""
-    return _fail_repetition(_failed_attempt_rows(serial_num))
-
+def _fail_count(serial_num: str, rows=None) -> int:
+    """Count operator-recorded FAILs, excluding prog ID mismatch records."""
+    if rows is None:
+        rows = _failed_attempt_rows(serial_num)
+    return sum(
+        not (row.get("remarks") or "").startswith("PROG ID MISMATCH:")
+        for row in rows
+    )
 
 def stations_passed(row: dict) -> bool:
     """Return True if all required stations are recorded as 1."""
     return all(row.get(s) == 1 for s in REQUIRED_STATIONS)
-
 
 def _already_packed_message(record: dict) -> str:
     recorded_at = record["date_time"]
@@ -107,7 +109,6 @@ def _already_packed_message(record: dict) -> str:
         f"shift {record['shift']}, recorded at {recorded_at}). "
         "No duplicate was written."
     )
-
 
 def record_packing(
     serial_num: str,
@@ -179,13 +180,13 @@ def record_packing(
 
 def record_fail(serial_num: str, po_num: str, operator_en: str, shift: str, reason: str):
     """
-    Record a FAIL:
-      - Inserts into esense_fvi with serial_num suffixed "_1", "_2", or "_3"
-      - status = 0, remarks = reason
-      - esense_main.fvi is NOT touched (the unit can be reworked and re-scanned).
+    Record a FAIL using the shared serial/test repetition sequence.
+    Only operator-recorded FAILs count toward the three-attempt limit.
     """
     conn = get_conn(read_timeout=15)
     try:
+        if reason.startswith("PROG ID MISMATCH:"):
+            reason = f"FAIL REASON: {reason}"
         cur = conn.cursor()
         cur.execute(
             """
@@ -198,7 +199,7 @@ def record_fail(serial_num: str, po_num: str, operator_en: str, shift: str, reas
         )
         rows = _failed_attempt_rows(serial_num, cur)
         repetition = _fail_repetition(rows) + 1
-        if repetition > MAX_FAIL_REPETITIONS:
+        if _fail_count(serial_num, rows) >= MAX_FAIL_REPETITIONS:
             conn.rollback()
             return None
 
@@ -220,16 +221,97 @@ def record_fail(serial_num: str, po_num: str, operator_en: str, shift: str, reas
         conn.close()
 
 
+def record_prog_mismatch(
+    prog_id: str,
+    serial_num: str,
+    po_num: str,
+    operator_en: str,
+    shift: str,
+) -> dict:
+    expected_prog_ids = [
+        row["prog_id"]
+        for row in query_all(
+            """
+            SELECT DISTINCT prog_id
+            FROM energous.esense_progtest
+            WHERE serial_num = %s
+            ORDER BY prog_id
+            """,
+            (serial_num,),
+        )
+    ]
+    expected = ", ".join(map(str, expected_prog_ids)) if expected_prog_ids else "none found"
+    remarks = (
+        f"PROG ID MISMATCH: scanned prog_id={prog_id}; "
+        f"expected prog_id={expected}."
+    )
+
+    conn = get_conn(read_timeout=15)
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT serial_num
+            FROM energous.esense_main
+            WHERE serial_num = %s
+            FOR UPDATE
+            """,
+            (serial_num,),
+        )
+        repetition = _fail_repetition(_failed_attempt_rows(serial_num, cur)) + 1
+        mismatch_serial = f"{serial_num}_{repetition}"
+        cur.execute(
+            """
+            INSERT INTO energous.esense_fvi
+                (serial_num, po_num, operator_en, shift, date_time, test_rep, remarks, status)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, 0)
+            """,
+            (
+                mismatch_serial,
+                po_num,
+                operator_en,
+                shift,
+                datetime.now(),
+                repetition,
+                remarks,
+            ),
+        )
+        conn.commit()
+        return {
+            "serial_num": mismatch_serial,
+            "test_rep": repetition,
+            "remarks": remarks,
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
 def process_prog_check(prog_id: str):
     """
-    Step 1: just validate the prog_id exists in progtest.
+    Look up the serial number associated with a prog_id.
     """
     prog_id = prog_id.strip()
     prog_row = lookup_prog_id(prog_id)
     if not prog_row:
         return {"status": "not_found", "message": f"Prog ID '{prog_id}' not found in progtest.", "ok": False}
 
-    return {"status": "ok", "message": f"Prog ID '{prog_id}' verified. Now scan the serial number.", "ok": True}
+    serial_num = (prog_row.get("serial_num") or "").strip()
+    if not serial_num:
+        return {
+            "status": "not_found",
+            "message": f"No serial number is associated with prog ID '{prog_id}'.",
+            "ok": False,
+        }
+
+    return {
+        "status": "ok",
+        "message": f"Prog ID '{prog_id}' verified. Serial '{serial_num}' retrieved.",
+        "ok": True,
+        "serial_num": serial_num,
+    }
 
 
 def validate_scan(prog_id: str, serial_num: str):
@@ -258,10 +340,17 @@ def validate_scan(prog_id: str, serial_num: str):
             "status": "already_packed",
             "message": _already_packed_message(packed_record),
             "unit": unit,
-            "saved_record": packed_record,
         }
 
-    if fail_repetition(serial_num) >= MAX_FAIL_REPETITIONS:
+    prog_mismatch = not verify_prog_matches_serial(prog_id, serial_num)
+    if prog_mismatch:
+        return {
+            "status": "mismatch",
+            "message": f"Prog ID '{prog_id}' does not match serial '{serial_num}'.",
+            "unit": unit,
+        }
+
+    if _fail_count(serial_num) >= MAX_FAIL_REPETITIONS:
         return {
             "status": "max_failures",
             "message": f"Serial '{serial_num}' has reached the maximum of {MAX_FAIL_REPETITIONS} FAIL attempts.",
@@ -276,13 +365,6 @@ def validate_scan(prog_id: str, serial_num: str):
             "unit": unit,
         }
 
-    if not verify_prog_matches_serial(prog_id, serial_num):
-        return {
-            "status": "mismatch",
-            "message": f"Prog ID '{prog_id}' does not match serial '{serial_num}'.",
-            "unit": unit,
-        }
-
     return {
         "status": "ok",
         "message": f"Serial '{serial_num}' verified. Choose PASS or FAIL.",
@@ -290,7 +372,14 @@ def validate_scan(prog_id: str, serial_num: str):
     }
 
 
-def finalize_scan(prog_id: str, serial_num: str, operator_en: str, shift: str, decision: str, remarks: str = ""):
+def finalize_scan(
+    prog_id: str,
+    serial_num: str,
+    operator_en: str,
+    shift: str,
+    decision: str,
+    remarks: str = "",
+):
     """
     Step 3: record the operator's decision.
     Re-runs validate_scan first so a stale/tampered client can't force a write.
@@ -331,7 +420,7 @@ def finalize_scan(prog_id: str, serial_num: str, operator_en: str, shift: str, d
             }
         return {
             "status": "ok",
-            "message": f"Serial '{serial_num}' recorded as FAIL (attempt {repetition} of {MAX_FAIL_REPETITIONS}): {reason}",
+            "message": f"Serial '{serial_num}' recorded as FAIL (test repetition {repetition}): {reason}",
             "unit": unit,
             "decision": "fail",
             "serial_num": f"{serial_num}_{repetition}",

@@ -21,7 +21,18 @@ performance still needs validation against the deployment database.
 This app reads and writes the production `energous.esense_main` and
 `energous.esense_fvi` tables.
 
+Operators scan only the prog ID. The app retrieves its associated serial number
+from `energous.esense_progtest` and validates that serial before showing PASS or
+FAIL; operators do not need to scan the unit's serial-number sticker.
+
 Before recording a final inspection, the unit must have passed `progtest`,
-`assembly`, `lasermarking1`, `vi`, `ft1`, `ft2`, and `lasermarking2`. Failed
-inspections are recorded with serial suffixes `_1` through `_3` and matching
-`test_rep` values; a fourth FAIL attempt is not accepted.
+`assembly`, `lasermarking1`, `vi`, `ft1`, `ft2`, and `lasermarking2`. Operator
+FAILs are limited to three attempts; a fourth operator FAIL is not accepted.
+FAIL and mismatch rows share an incrementing serial suffix and matching
+`test_rep`, so mismatch records can cause later rows to use suffixes above `_3`.
+
+If a prog ID/serial mapping mismatch is detected, the app logs the scanned and
+expected prog IDs in `remarks`, status `0`, and the next shared serial suffix
+and `test_rep`. Mismatches do not consume the three operator FAIL attempts;
+from test repetition 3 onward the scan warns operators to escalate to FA and
+blocks the current scan from reaching PASS/FAIL.

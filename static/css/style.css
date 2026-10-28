@@ -141,6 +141,7 @@ body {
 .scan-msg.hidden { display: none; }
 .scan-msg.success { background: #052e16; border: 1px solid var(--green); color: var(--green); }
 .scan-msg.error   { background: #1f0707; border: 1px solid var(--red);   color: var(--red); }
+.scan-msg.warning { background: #2b2108; border: 1px solid var(--yellow); color: var(--yellow); }
 
 /* ── Log Table ──────────────────────────────────────────────────────────── */
 .log-section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }

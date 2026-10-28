@@ -42,6 +42,7 @@
     <div class="scan-row">
       <input id="scan-prog-id" class="scan-input" type="text"
              placeholder="Scan or type prog id…" autocomplete="off" autofocus />
+      <button id="btn-clear-prog" class="btn-ghost" type="button">CLEAR</button>
       <button id="btn-scan-prog" class="btn-primary btn-scan">CHECK PROG ID</button>
     </div>
     <div id="scan-msg-prog" class="scan-msg hidden"></div>
@@ -116,6 +117,7 @@
   const emptyRow    = document.getElementById("empty-row");
   const shiftSel    = document.getElementById("sel-shift");
   const btnProg     = document.getElementById("btn-scan-prog");
+  const btnClearProg = document.getElementById("btn-clear-prog");
   const btnSerial   = document.getElementById("btn-scan-serial");
 
   const decisionRow   = document.getElementById("decision-row");
@@ -225,11 +227,18 @@
     const res  = await fetch(APP_ROOT + "/api/scan", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prog_id: verifiedProgId, serial_num: serial })
+      body: JSON.stringify({ prog_id: verifiedProgId, serial_num: serial, shift: shiftSel.value })
     });
     const data = await res.json();
 
     btnSerial.disabled = false;
+    if (data.mismatch_recorded) {
+      addLogRow(data.recorded_serial_num, data.unit?.po_num, "fail", data.message);
+      resetProgStep();
+      showMsg(msgSerial, data.message, "warning");
+      return;
+    }
+
     showMsg(msgSerial, data.message, data.ok ? "success" : "error");
 
     if (data.ok) {
@@ -249,6 +258,7 @@
     btnFail.disabled = true;
     btnSubmitFail.disabled = true;
     btnCancelFail.disabled = true;
+    btnClearProg.disabled = true;
     failReasonInput.disabled = true;
 
     try {
@@ -284,9 +294,17 @@
       btnFail.disabled = false;
       btnSubmitFail.disabled = false;
       btnCancelFail.disabled = false;
+      btnClearProg.disabled = false;
       failReasonInput.disabled = failReasonRow.classList.contains("hidden");
     }
   }
+
+  btnClearProg.addEventListener("click", () => {
+    if (decisionSubmitting) return;
+    resetProgStep();
+    msgProg.className = "scan-msg hidden";
+    msgSerial.className = "scan-msg hidden";
+  });
 
   btnProg.addEventListener("click", doCheckProg);
   scanProgId.addEventListener("keydown", e => { if (e.key === "Enter") doCheckProg(); });

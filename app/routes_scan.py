@@ -5,6 +5,51 @@ from app.scan import process_prog_check, finalize_scan, validate_scan, record_pr
 
 scan_bp = Blueprint("scan", __name__)
 
+
+def _validate_prog_scan(prog_id: str, shift: str):
+    prog_result = process_prog_check(prog_id)
+    if not prog_result["ok"]:
+        return prog_result
+
+    serial_num = prog_result["serial_num"]
+    result = validate_scan(prog_id, serial_num)
+    if result["status"] == "mismatch":
+        mismatch_record = record_prog_mismatch(
+            prog_id=prog_id,
+            serial_num=serial_num,
+            po_num=result["unit"]["po_num"],
+            operator_en=session["operator_en"],
+            shift=shift,
+        )
+        escalation = mismatch_record["test_rep"] >= 3
+        message = (
+            f"{mismatch_record['remarks']} Recorded as "
+            f"{mismatch_record['serial_num']} (test repetition "
+            f"{mismatch_record['test_rep']})."
+        )
+        message += (
+            " Escalate to FA. PASS/FAIL is unavailable for a mismatch."
+            if escalation
+            else " PASS/FAIL is unavailable for a mismatch."
+        )
+        return {
+            **result,
+            "ok": False,
+            "message": message,
+            "mismatch_recorded": True,
+            "recorded_serial_num": mismatch_record["serial_num"],
+            "test_rep": mismatch_record["test_rep"],
+            "remarks": mismatch_record["remarks"],
+        }
+
+    return {
+        **result,
+        "ok": result["status"] == "ok",
+        "prog_id": prog_id,
+        "serial_num": serial_num,
+    }
+
+
 # ── Auth ──────────────────────────────────────────────────────────────────────
 
 @scan_bp.route("/login", methods=["GET"])
@@ -46,8 +91,7 @@ def index():
                            operator_en=session["operator_en"],
                            tray_limit=Config.TRAY_LIMIT)
 
-# ── Prog ID check (step 1) ───────────────────────────────────────────────────
-
+# ── Prog ID scan and serial lookup ────────────────────────────────────────────
 @scan_bp.route("/api/check-prog", methods=["POST"])
 def api_check_prog():
     if "operator_en" not in session:
@@ -59,10 +103,10 @@ def api_check_prog():
     if not prog_id:
         return jsonify({"ok": False, "message": "Prog ID is required."}), 400
 
-    result = process_prog_check(prog_id)
-    return jsonify(result)
+    shift = (data.get("shift") or "").strip()
+    return jsonify(_validate_prog_scan(prog_id, shift))
 
-# ── Serial validation (step 2) ───────────────────────────────────────────────
+# ── Prog ID scan alias ───────────────────────────────────────────────────────
 
 @scan_bp.route("/api/scan", methods=["POST"])
 def api_scan():
@@ -70,46 +114,12 @@ def api_scan():
         return jsonify({"ok": False, "message": "Not authenticated."}), 401
 
     data = request.get_json(force=True)
-    prog_id    = (data.get("prog_id") or "").strip()
-    serial_num = (data.get("serial_num") or "").strip()
-    shift      = (data.get("shift") or "").strip()
+    prog_id = (data.get("prog_id") or "").strip()
+    shift = (data.get("shift") or "").strip()
 
     if not prog_id:
         return jsonify({"ok": False, "message": "Prog ID must be verified first."}), 400
-    if not serial_num:
-        return jsonify({"ok": False, "message": "Serial number is required."}), 400
-
-    result = validate_scan(prog_id, serial_num)
-    if result["status"] == "mismatch":
-        mismatch_record = record_prog_mismatch(
-            prog_id=prog_id,
-            serial_num=serial_num,
-            po_num=result["unit"]["po_num"],
-            operator_en=session["operator_en"],
-            shift=shift,
-        )
-        escalation = mismatch_record["test_rep"] >= 3
-        message = (
-            f"{mismatch_record['remarks']} Recorded as "
-            f"{mismatch_record['serial_num']} (test repetition "
-            f"{mismatch_record['test_rep']})."
-        )
-        if escalation:
-            message += " Escalate to FA. PASS/FAIL is unavailable for a mismatch."
-        else:
-            message += " PASS/FAIL is unavailable for a mismatch."
-        result.update(
-            ok=False,
-            message=message,
-            mismatch_recorded=True,
-            recorded_serial_num=mismatch_record["serial_num"],
-            test_rep=mismatch_record["test_rep"],
-            remarks=mismatch_record["remarks"],
-        )
-        return jsonify(result)
-
-    ok = result["status"] == "ok"
-    return jsonify({"ok": ok, **result})
+    return jsonify(_validate_prog_scan(prog_id, shift))
 
 # ── Pass / Fail decision (step 3) ────────────────────────────────────────────
 

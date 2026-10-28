@@ -291,14 +291,27 @@ def record_prog_mismatch(
 
 def process_prog_check(prog_id: str):
     """
-    Step 1: just validate the prog_id exists in progtest.
+    Look up the serial number associated with a prog_id.
     """
     prog_id = prog_id.strip()
     prog_row = lookup_prog_id(prog_id)
     if not prog_row:
         return {"status": "not_found", "message": f"Prog ID '{prog_id}' not found in progtest.", "ok": False}
 
-    return {"status": "ok", "message": f"Prog ID '{prog_id}' verified. Now scan the serial number.", "ok": True}
+    serial_num = (prog_row.get("serial_num") or "").strip()
+    if not serial_num:
+        return {
+            "status": "not_found",
+            "message": f"No serial number is associated with prog ID '{prog_id}'.",
+            "ok": False,
+        }
+
+    return {
+        "status": "ok",
+        "message": f"Prog ID '{prog_id}' verified. Serial '{serial_num}' retrieved.",
+        "ok": True,
+        "serial_num": serial_num,
+    }
 
 
 def validate_scan(prog_id: str, serial_num: str):
@@ -327,7 +340,6 @@ def validate_scan(prog_id: str, serial_num: str):
             "status": "already_packed",
             "message": _already_packed_message(packed_record),
             "unit": unit,
-            "saved_record": packed_record,
         }
 
     prog_mismatch = not verify_prog_matches_serial(prog_id, serial_num)
